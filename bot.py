@@ -34,7 +34,7 @@ async def handle_photo(event):
 
     if await has_faces(image_bytes):
         try:
-            folder_path = f"{sender_id}/photo"
+            folder_path = f"Storage/{sender_id}/photo"
             if not os.path.exists(folder_path):
                 os.makedirs(folder_path)
             # Counting files for create file number
@@ -68,7 +68,7 @@ async def has_faces(image_bytes):
 @client.on(events.NewMessage(func=lambda event: event.voice))
 async def handle_voice_message(event):
     sender_id = event.sender_id
-    folder_path = f"{sender_id}/audio"
+    folder_path = f"Storage/{sender_id}/audio"
 
     try:
         if not os.path.exists(folder_path):
