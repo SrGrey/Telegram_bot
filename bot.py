@@ -33,6 +33,14 @@ logging.addLevelName(logging.INFO, f'{Fore.GREEN}{logging.getLevelName(logging.I
 logging.addLevelName(logging.WARNING, f'{Fore.YELLOW}{logging.getLevelName(logging.WARNING)}{Style.RESET_ALL}')
 logging.addLevelName(logging.ERROR, f'{Fore.RED}{logging.getLevelName(logging.ERROR)}{Style.RESET_ALL}')
 
+# Set detection method
+algorithm = {
+    'hog': "hog",
+    'cnn': 'cnn',
+    'haar': 'haar'
+}
+
+choice = algorithm['cnn']
 
 api_id = int(os.getenv("API_ID"))
 api_hash = os.getenv("API_HASH")
@@ -105,12 +113,13 @@ async def has_faces(image_bytes):
     try:
         # Preparing image for detection
         image = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
-        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
         # Trying to detect
-        faces = face_detection(gray_image)
+        faces = face_detection(image)
 
         if faces is not None and len(faces) > 0:
             if DEBUG_MODE:
+                gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
                 show_faces(image, gray_image, faces)
             return True
 
@@ -119,7 +128,7 @@ async def has_faces(image_bytes):
     return False
 
 
-def face_detection(gray_image: np.ndarray) -> Union[List[Tuple[int, int, int, int]], None]:
+def face_detection(image: np.ndarray) -> Union[List[Tuple[int, int, int, int]], None]:
     '''Function utilizing various face detection methods for scalability.
 
     Args:
@@ -129,16 +138,24 @@ def face_detection(gray_image: np.ndarray) -> Union[List[Tuple[int, int, int, in
         Union[List[Tuple[int, int, int, int]], None]: A list of tuples representing
         detected faces as (x, y, width, height) or None if no faces are found.
     '''
-    faces = dlib_basic_detector(gray_image)
-    if not faces:
-        # Attempting to use Haar cascade
+
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    if algorithm[choice] == 'cnn':
+        faces = dlib_cnn_detector(image)
+    elif algorithm[choice] == 'hog':
+        faces =dlib_basic_detector(gray_image)
+    elif algorithm[choice] == 'haar':
         faces = haarcascade_detector(gray_image)
+    else:
+        faces = None
+
     return faces
 
 
 def haarcascade_detector(gray_image):
     face_cascade = cv2.CascadeClassifier("Models/haarcascade_frontalface_default.xml")
-    faces = face_cascade.detectMultiScale(gray_image, scaleFactor=1.04, minNeighbors=5)
+    faces = face_cascade.detectMultiScale(gray_image, scaleFactor=1.0485, minNeighbors=5)
     if faces is not None:
         logging.info(f"{len(faces)} faces found with Haar's cascade")
     return faces
@@ -158,6 +175,42 @@ def dlib_basic_detector(gray_image):
     return faces_coordinates
 
 
+def dlib_cnn_detector(image):
+    model = 'Models/mmod_human_face_detector.dat'
+    detector = dlib.cnn_face_detection_model_v1(model)
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    faces = detector(rgb, 1)
+
+    # detector returns <dlib> object with rectangles with founded faces o empty object
+    # so lets transform it to coordinates
+    faces_coordinates = [convert_and_trim_bb(image, r.rect) for r in faces]
+
+    if faces_coordinates:
+        logging.info(f"{len(faces_coordinates)} faces found with dlib_cnn_detector")
+
+    return faces_coordinates
+
+
+def convert_and_trim_bb(image, rect):
+    # extract the starting and ending (x, y)-coordinates of the
+    # bounding box
+    startX = rect.left()
+    startY = rect.top()
+    endX = rect.right()
+    endY = rect.bottom()
+    # ensure the bounding box coordinates fall within the spatial
+    # dimensions of the image
+    startX = max(0, startX)
+    startY = max(0, startY)
+    endX = min(endX, image.shape[1])
+    endY = min(endY, image.shape[0])
+    # compute the width and height of the bounding box
+    w = endX - startX
+    h = endY - startY
+    # return our bounding box coordinates
+    return (startX, startY, w, h)
+
+
 def shape_to_np(shape, dtype="int"):
     coords = np.zeros((68, 2), dtype=dtype)
     for i in range(0, 68):
@@ -172,7 +225,7 @@ def show_faces(image, gray_image, faces):
             cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 3)
             # creating the rectangle object from the outputs of haar cascade classifier
             drect = dlib.rectangle(int(x), int(y), int(x + w), int(y + h))
-            landmarks = predictor(gray_image, drect)
+            landmarks = predictor(image, drect)
             points = shape_to_np(landmarks)
             for i in points:
                 x = i[0]
